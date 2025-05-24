@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  app:
+    build: .
+    image: localhost:5001/myproject:${{ github.sha }}
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    ports:
+      - "8000:8000"
