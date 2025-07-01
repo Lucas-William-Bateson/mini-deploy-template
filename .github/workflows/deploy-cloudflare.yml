@@ -10,7 +10,7 @@ env:
   TUNNEL_ID: ${{ secrets.TUNNEL_ID }}
   ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
   DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
-  PROJECT_PORT: ${{ vars.PROJECT_PORT }}
+  APP_PORT: ${{ vars.APP_PORT }}
   DOMAIN: ${{ vars.DOMAIN || 'yourdomain.com' }}
 
 jobs:
@@ -39,14 +39,14 @@ jobs:
           if [ -z "$TUNNEL_ID" ]; then echo "❌ TUNNEL_ID missing"; exit 1; fi
           if [ -z "$ACCOUNT_ID" ]; then echo "❌ ACCOUNT_ID missing"; exit 1; fi
           if [ -z "$DOCKER_HOST" ]; then echo "❌ DOCKER_HOST missing"; exit 1; fi
-          if [ -z "$PROJECT_PORT" ]; then echo "❌ PROJECT_PORT missing"; exit 1; fi
+          if [ -z "$APP_PORT" ]; then echo "❌ APP_PORT missing"; exit 1; fi
           
           echo "✅ All variables present"
           echo "- Account ID: ${ACCOUNT_ID:0:8}..."
           echo "- Tunnel ID: ${TUNNEL_ID:0:8}..."
           echo "- Zone ID: ${ZONE_ID:0:8}..."
           echo "- FQDN: ${{ steps.domain.outputs.fqdn }}"
-          echo "- Service: http://$DOCKER_HOST:$PROJECT_PORT"
+          echo "- Service: http://$DOCKER_HOST:$APP_PORT"
       
       - name: Test API access
         run: |
@@ -84,7 +84,7 @@ jobs:
       - name: Update tunnel configuration
         run: |
           FQDN="${{ steps.domain.outputs.fqdn }}"
-          SERVICE="http://$DOCKER_HOST:$PROJECT_PORT"
+          SERVICE="http://$DOCKER_HOST:$APP_PORT"
           
           echo "Updating tunnel configuration for: $FQDN → $SERVICE"
           
@@ -203,7 +203,7 @@ jobs:
           echo "Configuration:"
           echo "- Project: ${{ steps.domain.outputs.project }}"
           echo "- Domain: ${{ steps.domain.outputs.fqdn }}"
-          echo "- Target: http://$DOCKER_HOST:$PROJECT_PORT"
+          echo "- Target: http://$DOCKER_HOST:$APP_PORT"
           echo ""
           echo "Your app should be available at: https://${{ steps.domain.outputs.fqdn }}"
           echo ""
