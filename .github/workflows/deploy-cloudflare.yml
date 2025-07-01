@@ -6,9 +6,9 @@ on:
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
-  TUNNEL_ID: ${{ secrets.CLOUDFLARE_TUNNEL_ID }}
-  ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  ZONE_ID: ${{ secrets.ZONE_ID }}
+  TUNNEL_ID: ${{ secrets.TUNNEL_ID }}
+  ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
   DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
   PROJECT_PORT: ${{ vars.PROJECT_PORT }}
   DOMAIN: ${{ vars.DOMAIN || 'yourdomain.com' }}
@@ -18,39 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: Debug Cloudflare API access
-        run: |
-          echo "Testing API access..."
-          
-          # Test account access
-          ACCOUNT_TEST=$(curl -s -X GET \
-            "https://api.cloudflare.com/client/v4/accounts" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          
-          echo "Account test response:"
-          echo $ACCOUNT_TEST | jq '.'
-          
-          # Test tunnel access  
-          TUNNEL_TEST=$(curl -s -X GET \
-            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          
-          echo "Tunnel list response:"
-          echo $TUNNEL_TEST | jq '.'
-          
-          # Test specific tunnel access
-          TUNNEL_DETAIL=$(curl -s -X GET \
-            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          
-          echo "Tunnel detail response:"
-          echo $TUNNEL_DETAIL | jq '.'
       
       - name: Generate project subdomain
         id: domain
@@ -63,153 +30,181 @@ jobs:
           echo "fqdn=${FQDN}" >> $GITHUB_OUTPUT
           echo "project=${PROJECT_NAME}" >> $GITHUB_OUTPUT
       
-      - name: Deploy tunnel configuration
+      - name: Validate environment
         run: |
-          node << 'EOF'
-          const https = require('https');
+          echo "Checking required variables..."
           
-          async function makeRequest(url, options, data = null) {
-            return new Promise((resolve, reject) => {
-              const req = https.request(url, options, (res) => {
-                let body = '';
-                res.on('data', (chunk) => body += chunk);
-                res.on('end', () => {
-                  try {
-                    resolve({
-                      statusCode: res.statusCode,
-                      data: JSON.parse(body)
-                    });
-                  } catch (e) {
-                    resolve({
-                      statusCode: res.statusCode,
-                      data: body
-                    });
-                  }
-                });
-              });
-              
-              req.on('error', reject);
-              
-              if (data) {
-                req.write(JSON.stringify(data));
-              }
-              
-              req.end();
-            });
-          }
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "❌ CLOUDFLARE_API_TOKEN missing"; exit 1; fi
+          if [ -z "$ZONE_ID" ]; then echo "❌ ZONE_ID missing"; exit 1; fi
+          if [ -z "$TUNNEL_ID" ]; then echo "❌ TUNNEL_ID missing"; exit 1; fi
+          if [ -z "$ACCOUNT_ID" ]; then echo "❌ ACCOUNT_ID missing"; exit 1; fi
+          if [ -z "$DOCKER_HOST" ]; then echo "❌ DOCKER_HOST missing"; exit 1; fi
+          if [ -z "$PROJECT_PORT" ]; then echo "❌ PROJECT_PORT missing"; exit 1; fi
           
-          async function updateTunnelConfig() {
-            const tunnelId = process.env.TUNNEL_ID;
-            const accountId = process.env.ACCOUNT_ID;
-            const token = process.env.CLOUDFLARE_API_TOKEN;
-            const subdomain = "${{ steps.domain.outputs.subdomain }}";
-            const fqdn = "${{ steps.domain.outputs.fqdn }}";
-            const port = process.env.PROJECT_PORT;
-            const dockerHost = process.env.DOCKER_HOST;
-            
-            const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/tunnels/${tunnelId}/configurations`;
-            const headers = {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            };
-            
-            try {
-              // First, get current tunnel configuration
-              const currentConfigResponse = await makeRequest(baseUrl, {
-                method: 'GET',
-                headers
-              });
-              
-              if (currentConfigResponse.statusCode !== 200 || !currentConfigResponse.data.success) {
-                throw new Error(`Failed to get tunnel config: ${JSON.stringify(currentConfigResponse.data.errors)}`);
-              }
-              
-              let config = currentConfigResponse.data.result.config;
-              
-              // Add or update the ingress rule for this project
-              const newRule = {
-                hostname: fqdn,
-                service: `http://${dockerHost}:${port}`
-              };
-              
-              // Remove existing rule for this hostname if it exists
-              config.ingress = config.ingress.filter(rule => rule.hostname !== fqdn);
-              
-              // Add new rule (before the catch-all rule)
-              const catchAllIndex = config.ingress.findIndex(rule => rule.service === 'http_status:404');
-              if (catchAllIndex > -1) {
-                config.ingress.splice(catchAllIndex, 0, newRule);
-              } else {
-                config.ingress.push(newRule);
-              }
-              
-              const response = await makeRequest(baseUrl, {
-                method: 'PUT',
-                headers
-              }, { config });
-              
-              if (response.statusCode !== 200 || !response.data.success) {
-                throw new Error(`Failed to update tunnel config: ${JSON.stringify(response.data.errors)}`);
-              }
-              
-              console.log(`✅ Tunnel configuration updated for ${fqdn}`);
-            } catch (error) {
-              console.error('❌ Error updating tunnel config:', error);
-              process.exit(1);
-            }
-          }
+          echo "✅ All variables present"
+          echo "- Account ID: ${ACCOUNT_ID:0:8}..."
+          echo "- Tunnel ID: ${TUNNEL_ID:0:8}..."
+          echo "- Zone ID: ${ZONE_ID:0:8}..."
+          echo "- FQDN: ${{ steps.domain.outputs.fqdn }}"
+          echo "- Service: http://$DOCKER_HOST:$PROJECT_PORT"
+      
+      - name: Test API access
+        run: |
+          echo "Testing Cloudflare API access..."
           
-          updateTunnelConfig();
-          EOF
+          # Test token validity
+          TOKEN_TEST=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          
+          TOKEN_VALID=$(echo "$TOKEN_TEST" | jq -r '.success')
+          if [ "$TOKEN_VALID" != "true" ]; then
+            echo "❌ Invalid API token"
+            echo "$TOKEN_TEST" | jq '.errors[]'
+            exit 1
+          fi
+          
+          echo "✅ API token valid"
+          
+          # Test tunnel access
+          TUNNEL_TEST=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          
+          TUNNEL_VALID=$(echo "$TUNNEL_TEST" | jq -r '.success')
+          if [ "$TUNNEL_VALID" != "true" ]; then
+            echo "❌ Cannot access tunnel"
+            echo "$TUNNEL_TEST" | jq '.errors[]'
+            exit 1
+          fi
+          
+          echo "✅ Tunnel access confirmed"
+          echo "Tunnel name: $(echo "$TUNNEL_TEST" | jq -r '.result.name')"
+      
+      - name: Update tunnel configuration
+        run: |
+          FQDN="${{ steps.domain.outputs.fqdn }}"
+          SERVICE="http://$DOCKER_HOST:$PROJECT_PORT"
+          
+          echo "Updating tunnel configuration for: $FQDN → $SERVICE"
+          
+          # Get current configuration
+          CURRENT_CONFIG=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          
+          echo "Current config response:"
+          echo "$CURRENT_CONFIG" | jq '.'
+          
+          CONFIG_SUCCESS=$(echo "$CURRENT_CONFIG" | jq -r '.success')
+          if [ "$CONFIG_SUCCESS" != "true" ]; then
+            echo "❌ Failed to get tunnel configuration"
+            echo "$CURRENT_CONFIG" | jq '.errors[]'
+            exit 1
+          fi
+          
+          # Extract current config and create updated version
+          echo "$CURRENT_CONFIG" | jq -r '.result.config' > current_config.json
+          
+          # Create new config with updated ingress rules
+          jq --arg hostname "$FQDN" --arg service "$SERVICE" '
+            # Remove existing rule for this hostname
+            .ingress = (.ingress | map(select(.hostname != $hostname))) |
+            # Find catch-all rule index (rules without hostname or with http_status)
+            (.ingress | map(.hostname == null or (.service | test("http_status:"))) | index(true)) as $catchall_idx |
+            # Insert new rule before catch-all
+            if $catchall_idx then
+              .ingress = (.ingress[:$catchall_idx] + [{"hostname": $hostname, "service": $service}] + .ingress[$catchall_idx:])
+            else
+              .ingress = .ingress + [{"hostname": $hostname, "service": $service}]
+            end
+          ' current_config.json > new_config.json
+          
+          echo "New configuration:"
+          cat new_config.json | jq '.'
+          
+          # Update tunnel configuration
+          UPDATE_RESPONSE=$(curl -s -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "{\"config\": $(cat new_config.json)}")
+          
+          echo "Update response:"
+          echo "$UPDATE_RESPONSE" | jq '.'
+          
+          UPDATE_SUCCESS=$(echo "$UPDATE_RESPONSE" | jq -r '.success')
+          if [ "$UPDATE_SUCCESS" != "true" ]; then
+            echo "❌ Failed to update tunnel configuration"
+            echo "$UPDATE_RESPONSE" | jq '.errors[]'
+            exit 1
+          fi
+          
+          echo "✅ Tunnel configuration updated for $FQDN"
+          
+          # Cleanup
+          rm -f current_config.json new_config.json
       
       - name: Create/Update DNS Record
         run: |
           SUBDOMAIN="${{ steps.domain.outputs.subdomain }}"
-          TUNNEL_CNAME="${{ env.TUNNEL_ID }}.cfargotunnel.com"
+          FQDN="${{ steps.domain.outputs.fqdn }}"
+          TUNNEL_CNAME="$TUNNEL_ID.cfargotunnel.com"
           
-          # Check if DNS record exists
+          echo "Managing DNS record: $FQDN → $TUNNEL_CNAME"
+          
+          # Check for existing DNS record
           EXISTING_RECORD=$(curl -s -X GET \
-            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${{ steps.domain.outputs.fqdn }}" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$FQDN" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
           
-          RECORD_ID=$(echo $EXISTING_RECORD | jq -r '.result[0].id // empty')
+          RECORD_ID=$(echo "$EXISTING_RECORD" | jq -r '.result[0].id // empty')
+          
+          RECORD_DATA=$(jq -n \
+            --arg type "CNAME" \
+            --arg name "$SUBDOMAIN" \
+            --arg content "$TUNNEL_CNAME" \
+            --argjson ttl 1 \
+            --argjson proxied true \
+            '{type: $type, name: $name, content: $content, ttl: $ttl, proxied: $proxied}')
           
           if [ -n "$RECORD_ID" ] && [ "$RECORD_ID" != "null" ]; then
-            # Update existing record
-            echo "Updating existing DNS record..."
-            curl -X PUT \
+            echo "Updating existing DNS record (ID: $RECORD_ID)..."
+            DNS_RESPONSE=$(curl -s -X PUT \
               "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
-              --data "{
-                \"type\": \"CNAME\",
-                \"name\": \"$SUBDOMAIN\",
-                \"content\": \"$TUNNEL_CNAME\",
-                \"ttl\": 1,
-                \"proxied\": true
-              }"
+              --data "$RECORD_DATA")
           else
-            # Create new record
             echo "Creating new DNS record..."
-            curl -X POST \
+            DNS_RESPONSE=$(curl -s -X POST \
               "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               -H "Content-Type: application/json" \
-              --data "{
-                \"type\": \"CNAME\",
-                \"name\": \"$SUBDOMAIN\",
-                \"content\": \"$TUNNEL_CNAME\",
-                \"ttl\": 1,
-                \"proxied\": true
-              }"
+              --data "$RECORD_DATA")
           fi
           
-          echo "✅ DNS record configured for ${{ steps.domain.outputs.fqdn }}"
+          echo "DNS response:"
+          echo "$DNS_RESPONSE" | jq '.'
+          
+          DNS_SUCCESS=$(echo "$DNS_RESPONSE" | jq -r '.success')
+          if [ "$DNS_SUCCESS" != "true" ]; then
+            echo "❌ Failed to manage DNS record"
+            echo "$DNS_RESPONSE" | jq '.errors[]'
+            exit 1
+          fi
+          
+          echo "✅ DNS record configured for $FQDN"
       
-      - name: Trigger Docker deployment
+      - name: Summary
         run: |
-          # Optional: trigger deployment on your on-prem machine
-          # You could use SSH, webhook, or other mechanism here
-          echo "🚀 Deployment configured for ${{ steps.domain.outputs.fqdn }}"
-          echo "Tunnel will route traffic to ${{ env.DOCKER_HOST }}:${{ env.PROJECT_PORT }}"
+          echo "🚀 Deployment completed successfully!"
+          echo ""
+          echo "Configuration:"
+          echo "- Project: ${{ steps.domain.outputs.project }}"
+          echo "- Domain: ${{ steps.domain.outputs.fqdn }}"
+          echo "- Target: http://$DOCKER_HOST:$PROJECT_PORT"
+          echo ""
+          echo "Your app should be available at: https://${{ steps.domain.outputs.fqdn }}"
+          echo ""
+          echo "Note: DNS propagation may take a few minutes."
