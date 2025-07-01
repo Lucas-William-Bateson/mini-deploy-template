@@ -10,8 +10,8 @@ env:
   TUNNEL_ID: ${{ secrets.TUNNEL_ID }}
   ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
   DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
-  APP_PORT: ${{ vars.APP_PORT }}
-  DOMAIN: ${{ vars.DOMAIN || 'yourdomain.com' }}
+  APP_PORT: ${{ vars.APP_PORT || '3000' }}
+  DOMAIN: ${{ vars.DOMAIN }}
 
 jobs:
   deploy:
