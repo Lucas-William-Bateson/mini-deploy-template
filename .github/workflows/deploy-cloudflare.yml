@@ -10,14 +10,33 @@ env:
   TUNNEL_ID: ${{ secrets.TUNNEL_ID }}
   ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
   DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
-  APP_PORT: ${{ vars.APP_PORT || '3000' }}
-  DOMAIN: ${{ vars.DOMAIN }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Load production environment variables
+        run: |
+          if [ -f .env.production ]; then
+            echo "Loading .env.production..."
+            # Load variables and export them to GITHUB_ENV
+            while IFS= read -r line; do
+              # Skip empty lines and comments
+              if [[ -n "$line" && ! "$line" =~ ^[[:space:]]*# ]]; then
+                # Remove any quotes and export to GITHUB_ENV
+                clean_line=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//')
+                if [[ "$clean_line" == *"="* ]]; then
+                  echo "$clean_line" >> $GITHUB_ENV
+                  echo "Loaded: ${clean_line%%=*}"
+                fi
+              fi
+            done < .env.production
+          else
+            echo "❌ .env.production file not found"
+            exit 1
+          fi
       
       - name: Generate project subdomain
         id: domain
