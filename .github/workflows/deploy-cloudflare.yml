@@ -11,6 +11,7 @@ env:
   ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
   PROJECT_PORT: ${{ vars.PROJECT_PORT }}
+  DOMAIN: ${{ vars.DOMAIN || 'yourdomain.com' }}
 
 jobs:
   deploy:
@@ -28,7 +29,8 @@ jobs:
         run: |
           PROJECT_NAME=$(echo ${{ github.repository }} | cut -d'/' -f2)
           SUBDOMAIN="${PROJECT_NAME}"
-          FQDN="${SUBDOMAIN}.l3s.me"
+          DOMAIN="${{ env.DOMAIN }}"
+          FQDN="${SUBDOMAIN}.${DOMAIN}"
           echo "subdomain=${SUBDOMAIN}" >> $GITHUB_OUTPUT
           echo "fqdn=${FQDN}" >> $GITHUB_OUTPUT
           echo "project=${PROJECT_NAME}" >> $GITHUB_OUTPUT
@@ -77,7 +79,7 @@ jobs:
             const port = process.env.PROJECT_PORT;
             const dockerHost = process.env.DOCKER_HOST;
             
-            const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`;
+            const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/tunnels/${tunnelId}/configurations`;
             const headers = {
               'Authorization': `Bearer ${token}`,
               'Content-Type': 'application/json'
@@ -139,7 +141,7 @@ jobs:
           
           # Check if DNS record exists
           EXISTING_RECORD=$(curl -s -X GET \
-            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$SUBDOMAIN.yourdomain.com" \
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=${{ steps.domain.outputs.fqdn }}" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json")
           
