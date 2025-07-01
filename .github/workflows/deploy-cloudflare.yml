@@ -1,0 +1,185 @@
+name: Deploy to Cloudflare Tunnel
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+  TUNNEL_ID: ${{ secrets.CLOUDFLARE_TUNNEL_ID }}
+  ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  DOCKER_HOST: ${{ secrets.DOCKER_HOST }}
+  PROJECT_PORT: ${{ vars.PROJECT_PORT }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Generate project subdomain
+        id: domain
+        run: |
+          PROJECT_NAME=$(echo ${{ github.repository }} | cut -d'/' -f2)
+          SUBDOMAIN="${PROJECT_NAME}"
+          FQDN="${SUBDOMAIN}.l3s.me"
+          echo "subdomain=${SUBDOMAIN}" >> $GITHUB_OUTPUT
+          echo "fqdn=${FQDN}" >> $GITHUB_OUTPUT
+          echo "project=${PROJECT_NAME}" >> $GITHUB_OUTPUT
+      
+      - name: Deploy tunnel configuration
+        run: |
+          node << 'EOF'
+          const https = require('https');
+          
+          async function makeRequest(url, options, data = null) {
+            return new Promise((resolve, reject) => {
+              const req = https.request(url, options, (res) => {
+                let body = '';
+                res.on('data', (chunk) => body += chunk);
+                res.on('end', () => {
+                  try {
+                    resolve({
+                      statusCode: res.statusCode,
+                      data: JSON.parse(body)
+                    });
+                  } catch (e) {
+                    resolve({
+                      statusCode: res.statusCode,
+                      data: body
+                    });
+                  }
+                });
+              });
+              
+              req.on('error', reject);
+              
+              if (data) {
+                req.write(JSON.stringify(data));
+              }
+              
+              req.end();
+            });
+          }
+          
+          async function updateTunnelConfig() {
+            const tunnelId = process.env.TUNNEL_ID;
+            const accountId = process.env.ACCOUNT_ID;
+            const token = process.env.CLOUDFLARE_API_TOKEN;
+            const subdomain = "${{ steps.domain.outputs.subdomain }}";
+            const fqdn = "${{ steps.domain.outputs.fqdn }}";
+            const port = process.env.PROJECT_PORT;
+            const dockerHost = process.env.DOCKER_HOST;
+            
+            const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`;
+            const headers = {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            };
+            
+            try {
+              // First, get current tunnel configuration
+              const currentConfigResponse = await makeRequest(baseUrl, {
+                method: 'GET',
+                headers
+              });
+              
+              if (currentConfigResponse.statusCode !== 200 || !currentConfigResponse.data.success) {
+                throw new Error(`Failed to get tunnel config: ${JSON.stringify(currentConfigResponse.data.errors)}`);
+              }
+              
+              let config = currentConfigResponse.data.result.config;
+              
+              // Add or update the ingress rule for this project
+              const newRule = {
+                hostname: fqdn,
+                service: `http://${dockerHost}:${port}`
+              };
+              
+              // Remove existing rule for this hostname if it exists
+              config.ingress = config.ingress.filter(rule => rule.hostname !== fqdn);
+              
+              // Add new rule (before the catch-all rule)
+              const catchAllIndex = config.ingress.findIndex(rule => rule.service === 'http_status:404');
+              if (catchAllIndex > -1) {
+                config.ingress.splice(catchAllIndex, 0, newRule);
+              } else {
+                config.ingress.push(newRule);
+              }
+              
+              const response = await makeRequest(baseUrl, {
+                method: 'PUT',
+                headers
+              }, { config });
+              
+              if (response.statusCode !== 200 || !response.data.success) {
+                throw new Error(`Failed to update tunnel config: ${JSON.stringify(response.data.errors)}`);
+              }
+              
+              console.log(`✅ Tunnel configuration updated for ${fqdn}`);
+            } catch (error) {
+              console.error('❌ Error updating tunnel config:', error);
+              process.exit(1);
+            }
+          }
+          
+          updateTunnelConfig();
+          EOF
+      
+      - name: Create/Update DNS Record
+        run: |
+          SUBDOMAIN="${{ steps.domain.outputs.subdomain }}"
+          TUNNEL_CNAME="${{ env.TUNNEL_ID }}.cfargotunnel.com"
+          
+          # Check if DNS record exists
+          EXISTING_RECORD=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$SUBDOMAIN.yourdomain.com" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json")
+          
+          RECORD_ID=$(echo $EXISTING_RECORD | jq -r '.result[0].id // empty')
+          
+          if [ -n "$RECORD_ID" ] && [ "$RECORD_ID" != "null" ]; then
+            # Update existing record
+            echo "Updating existing DNS record..."
+            curl -X PUT \
+              "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{
+                \"type\": \"CNAME\",
+                \"name\": \"$SUBDOMAIN\",
+                \"content\": \"$TUNNEL_CNAME\",
+                \"ttl\": 1,
+                \"proxied\": true
+              }"
+          else
+            # Create new record
+            echo "Creating new DNS record..."
+            curl -X POST \
+              "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              --data "{
+                \"type\": \"CNAME\",
+                \"name\": \"$SUBDOMAIN\",
+                \"content\": \"$TUNNEL_CNAME\",
+                \"ttl\": 1,
+                \"proxied\": true
+              }"
+          fi
+          
+          echo "✅ DNS record configured for ${{ steps.domain.outputs.fqdn }}"
+      
+      - name: Trigger Docker deployment
+        run: |
+          # Optional: trigger deployment on your on-prem machine
+          # You could use SSH, webhook, or other mechanism here
+          echo "🚀 Deployment configured for ${{ steps.domain.outputs.fqdn }}"
+          echo "Tunnel will route traffic to ${{ env.DOCKER_HOST }}:${{ env.PROJECT_PORT }}"
