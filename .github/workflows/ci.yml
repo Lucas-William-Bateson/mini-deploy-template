@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: localhost:5000
+  REGISTRY: localhost:5001
 
 jobs:
   deploy:

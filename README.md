@@ -15,11 +15,11 @@ Before you begin, ensure you have:
 
 ### 1. Container Registry Setup
 
-**⚠️ REQUIRED**: Update the registry URL in `.github/workflows/ci.yml`:
+**Update the registry URL in `.github/workflows/ci.yml`:**
 
 ```yaml
 env:
-  REGISTRY: localhost:5000 # 👈 CHANGE THIS
+  REGISTRY: localhost:5001 # 👈 CHANGE THIS
 ```
 
 **Options:**
