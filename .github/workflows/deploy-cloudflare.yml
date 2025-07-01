@@ -24,6 +24,34 @@ jobs:
         with:
           node-version: '20'
       
+      - name: Debug Cloudflare API access
+        run: |
+          echo "Testing API access..."
+          
+          # Test account access
+          ACCOUNT_TEST=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/accounts" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          
+          echo "Account test response:"
+          echo $ACCOUNT_TEST | jq '.'
+          
+          # Test tunnel access  
+          TUNNEL_TEST=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          
+          echo "Tunnel list response:"
+          echo $TUNNEL_TEST | jq '.'
+          
+          # Test specific tunnel access
+          TUNNEL_DETAIL=$(curl -s -X GET \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          
+          echo "Tunnel detail response:"
+          echo $TUNNEL_DETAIL | jq '.'
+      
       - name: Generate project subdomain
         id: domain
         run: |
