@@ -99,6 +99,15 @@ jobs:
           export MAINTAINER_EMAIL=$MAINTAINER_EMAIL
           export ENVIRONMENT=$ENVIRONMENT
           
+          # Debug: Show environment variables
+          echo "Environment variables for docker-compose:"
+          echo "APP_NAME=$APP_NAME"
+          echo "IMAGE_FULL=$IMAGE_FULL"
+          echo "CONTAINER_NAME=$CONTAINER_NAME"
+          echo "NETWORK_NAME=$NETWORK_NAME"
+          echo "HOST_PORT=$HOST_PORT"
+          echo "APP_PORT=$APP_PORT"
+          
           # Stop existing containers gracefully
           docker compose -f docker-compose.yml -f docker-compose.prod.yml down --timeout 30 || true
           
@@ -134,6 +143,7 @@ jobs:
         run: |
           # Perform health check
           echo "Performing health check..."
+          echo "Checking service at http://localhost:$HOST_PORT"
           
           # Wait for health check to pass
           HEALTH_RETRY=0
@@ -155,9 +165,9 @@ jobs:
               if [ $HEALTH_RETRY -eq $MAX_HEALTH_RETRIES ]; then
                 echo "⚠️ Health check failed after $MAX_HEALTH_RETRIES attempts"
                 echo "Container status:"
-                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml ps
+                cd docker && docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
                 echo "Container logs (last 20 lines):"
-                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml logs --tail=20
+                cd docker && docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=20
                 break
               fi
               sleep 5

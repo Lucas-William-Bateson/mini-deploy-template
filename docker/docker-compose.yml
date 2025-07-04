@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   app:
     image: ${IMAGE_FULL}
@@ -17,7 +15,7 @@ services:
     ports:
       - "${HOST_PORT}:${APP_PORT}"
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:${APP_PORT}"]
+      test: ["CMD", "curl", "-f", "http://localhost:${APP_PORT}"]
       interval: 30s
       timeout: 10s
       retries: 3
