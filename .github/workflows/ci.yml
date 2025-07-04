@@ -99,6 +99,11 @@ jobs:
           export MAINTAINER_EMAIL=$MAINTAINER_EMAIL
           export ENVIRONMENT=$ENVIRONMENT
           
+          # Save deployment variables for subsequent steps
+          echo "IMAGE_FULL=$IMAGE_FULL" >> $GITHUB_ENV
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+          echo "NETWORK_NAME=$NETWORK_NAME" >> $GITHUB_ENV
+          
           # Debug: Show environment variables
           echo "Environment variables for docker-compose:"
           echo "APP_NAME=$APP_NAME"
@@ -165,9 +170,37 @@ jobs:
               if [ $HEALTH_RETRY -eq $MAX_HEALTH_RETRIES ]; then
                 echo "⚠️ Health check failed after $MAX_HEALTH_RETRIES attempts"
                 echo "Container status:"
-                cd docker && docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+                cd docker && \
+                  IMAGE_FULL="$REGISTRY/$APP_NAME:$IMAGE_TAG" \
+                  CONTAINER_NAME="$APP_NAME-prod" \
+                  NETWORK_NAME="$APP_NAME-prod-network" \
+                  APP_NAME=$APP_NAME \
+                  APP_PORT=$APP_PORT \
+                  HOST_PORT=$HOST_PORT \
+                  CPU_LIMIT=$CPU_LIMIT \
+                  MEMORY_LIMIT=$MEMORY_LIMIT \
+                  MIN_CPU_LIMIT=$MIN_CPU_LIMIT \
+                  MIN_MEMORY_LIMIT=$MIN_MEMORY_LIMIT \
+                  VERSION=$VERSION \
+                  MAINTAINER_EMAIL=$MAINTAINER_EMAIL \
+                  ENVIRONMENT=$ENVIRONMENT \
+                  docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
                 echo "Container logs (last 20 lines):"
-                cd docker && docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=20
+                cd docker && \
+                  IMAGE_FULL="$REGISTRY/$APP_NAME:$IMAGE_TAG" \
+                  CONTAINER_NAME="$APP_NAME-prod" \
+                  NETWORK_NAME="$APP_NAME-prod-network" \
+                  APP_NAME=$APP_NAME \
+                  APP_PORT=$APP_PORT \
+                  HOST_PORT=$HOST_PORT \
+                  CPU_LIMIT=$CPU_LIMIT \
+                  MEMORY_LIMIT=$MEMORY_LIMIT \
+                  MIN_CPU_LIMIT=$MIN_CPU_LIMIT \
+                  MIN_MEMORY_LIMIT=$MIN_MEMORY_LIMIT \
+                  VERSION=$VERSION \
+                  MAINTAINER_EMAIL=$MAINTAINER_EMAIL \
+                  ENVIRONMENT=$ENVIRONMENT \
+                  docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=20
                 break
               fi
               sleep 5
