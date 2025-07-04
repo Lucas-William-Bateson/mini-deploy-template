@@ -38,17 +38,6 @@ jobs:
             exit 1
           fi
       
-      - name: Generate project subdomain
-        id: domain
-        run: |
-          PROJECT_NAME=$(echo ${{ github.repository }} | cut -d'/' -f2)
-          SUBDOMAIN="${PROJECT_NAME}"
-          DOMAIN="${{ env.DOMAIN }}"
-          FQDN="${SUBDOMAIN}.${DOMAIN}"
-          echo "subdomain=${SUBDOMAIN}" >> $GITHUB_OUTPUT
-          echo "fqdn=${FQDN}" >> $GITHUB_OUTPUT
-          echo "project=${PROJECT_NAME}" >> $GITHUB_OUTPUT
-      
       - name: Validate environment
         run: |
           echo "Checking required variables..."
@@ -64,7 +53,6 @@ jobs:
           echo "- Account ID: ${ACCOUNT_ID:0:8}..."
           echo "- Tunnel ID: ${TUNNEL_ID:0:8}..."
           echo "- Zone ID: ${ZONE_ID:0:8}..."
-          echo "- FQDN: ${{ steps.domain.outputs.fqdn }}"
           echo "- Service: http://$DOCKER_HOST:$APP_PORT"
       
       - name: Test API access
@@ -102,7 +90,8 @@ jobs:
       
       - name: Update tunnel configuration
         run: |
-          FQDN="${{ steps.domain.outputs.fqdn }}"
+          PROJECT_NAME=$(echo ${{ github.repository }} | cut -d'/' -f2)
+          FQDN="${PROJECT_NAME}.${{ env.DOMAIN }}"
           SERVICE="http://$DOCKER_HOST:$APP_PORT"
           
           echo "Updating tunnel configuration for: $FQDN → $SERVICE"
@@ -163,57 +152,6 @@ jobs:
           
           # Cleanup
           rm -f current_config.json new_config.json
-      
-      - name: Create/Update DNS Record
-        run: |
-          SUBDOMAIN="${{ steps.domain.outputs.subdomain }}"
-          FQDN="${{ steps.domain.outputs.fqdn }}"
-          TUNNEL_CNAME="$TUNNEL_ID.cfargotunnel.com"
-          
-          echo "Managing DNS record: $FQDN → $TUNNEL_CNAME"
-          
-          # Check for existing DNS record
-          EXISTING_RECORD=$(curl -s -X GET \
-            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$FQDN" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          
-          RECORD_ID=$(echo "$EXISTING_RECORD" | jq -r '.result[0].id // empty')
-          
-          RECORD_DATA=$(jq -n \
-            --arg type "CNAME" \
-            --arg name "$SUBDOMAIN" \
-            --arg content "$TUNNEL_CNAME" \
-            --argjson ttl 1 \
-            --argjson proxied true \
-            '{type: $type, name: $name, content: $content, ttl: $ttl, proxied: $proxied}')
-          
-          if [ -n "$RECORD_ID" ] && [ "$RECORD_ID" != "null" ]; then
-            echo "Updating existing DNS record (ID: $RECORD_ID)..."
-            DNS_RESPONSE=$(curl -s -X PUT \
-              "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data "$RECORD_DATA")
-          else
-            echo "Creating new DNS record..."
-            DNS_RESPONSE=$(curl -s -X POST \
-              "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data "$RECORD_DATA")
-          fi
-          
-          echo "DNS response:"
-          echo "$DNS_RESPONSE" | jq '.'
-          
-          DNS_SUCCESS=$(echo "$DNS_RESPONSE" | jq -r '.success')
-          if [ "$DNS_SUCCESS" != "true" ]; then
-            echo "❌ Failed to manage DNS record"
-            echo "$DNS_RESPONSE" | jq '.errors[]'
-            exit 1
-          fi
-          
-          echo "✅ DNS record configured for $FQDN"
       
       - name: Summary
         run: |
