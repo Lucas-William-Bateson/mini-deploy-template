@@ -139,14 +139,25 @@ jobs:
           HEALTH_RETRY=0
           MAX_HEALTH_RETRIES=10
           while [ $HEALTH_RETRY -lt $MAX_HEALTH_RETRIES ]; do
-            if curl -f -s http://localhost:$HOST_PORT/health || wget -q --spider http://localhost:$HOST_PORT || curl -f -s http://localhost:$HOST_PORT; then
-              echo "✅ Health check passed"
+            # Try different health check endpoints in order of preference
+            if curl -f -s http://localhost:$HOST_PORT/health >/dev/null 2>&1; then
+              echo "✅ Health check passed - /health endpoint responding"
+              break
+            elif curl -f -s http://localhost:$HOST_PORT >/dev/null 2>&1; then
+              echo "✅ Health check passed - root endpoint responding"
+              break
+            elif curl -s http://localhost:$HOST_PORT >/dev/null 2>&1; then
+              echo "✅ Health check passed - service is responding"
               break
             else
               HEALTH_RETRY=$((HEALTH_RETRY + 1))
               echo "⏳ Health check attempt $HEALTH_RETRY/$MAX_HEALTH_RETRIES..."
               if [ $HEALTH_RETRY -eq $MAX_HEALTH_RETRIES ]; then
-                echo "⚠️ Health check failed, but container is running - this might be expected for some applications"
+                echo "⚠️ Health check failed after $MAX_HEALTH_RETRIES attempts"
+                echo "Container status:"
+                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml ps
+                echo "Container logs (last 20 lines):"
+                docker compose -f docker/docker-compose.yml -f docker/docker-compose.prod.yml logs --tail=20
                 break
               fi
               sleep 5
